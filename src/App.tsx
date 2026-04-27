@@ -25,7 +25,16 @@ import { GoogleGenAI } from "@google/genai";
 import html2canvas from 'html2canvas';
 import { BACKGROUNDS, CHARACTERS, Dialogue, VideoProject } from './constants';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Safe API Key access
+const getApiKey = () => {
+  try {
+    return (window as any).process?.env?.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
+  } catch (e) {
+    return "";
+  }
+};
+
+const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 // --- Character Component ---
 const CharacterAvatar = ({ id, color, image, isSpeaking }: { id: string; color: string; image: string; isSpeaking: boolean }) => (
@@ -46,9 +55,9 @@ const CharacterAvatar = ({ id, color, image, isSpeaking }: { id: string; color: 
           className="max-w-full max-h-full object-contain"
           referrerPolicy="no-referrer"
           onError={(e) => {
-            // Fallback if image fails - use a more visual character fallback
-            if (!e.currentTarget.src.includes('initials')) {
-              e.currentTarget.src = `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(id)}`;
+            // High quality graphical fallback
+            if (!e.currentTarget.src.includes('bottts')) {
+              e.currentTarget.src = `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(id)}&backgroundColor=b6e3f4`;
             }
           }}
         />
@@ -335,7 +344,6 @@ export default function App() {
       return newLib;
     });
 
-    // If we're deleting the active project, reset it
     if (project.id === id) {
       resetProject();
     }
@@ -801,15 +809,15 @@ export default function App() {
                                       const isMale = name.includes('male') || name.includes('guy') || name.includes('david') || name.includes('marco') || name.includes('stefano') || name.includes('maschile') || name.includes('daniele') || name.includes('frank') || name.includes('luca') || name.includes('davide') || name.includes('riccardo') || name.includes('pietro');
                                       const isFemale = name.includes('female') || name.includes('woman') || name.includes('zira') || name.includes('elsa') || name.includes('cosma') || name.includes('marta') || name.includes('femminile') || name.includes('chiara') || name.includes('sofia') || name.includes('alice') || name.includes('paola') || name.includes('elena') || name.includes('isabella');
                                       
-                                      if (isMale) type = " (M)";
-                                      else if (isFemale) type = " (F)";
+                                      if (isMale) type = " ♂ (M)";
+                                      else if (isFemale) type = " ♀ (F)";
                                       
-                                      const isNatural = name.includes('natural') || name.includes('online') || name.includes('neural');
+                                      const isNatural = name.includes('natural') || name.includes('online') || name.includes('neural') || name.includes('premium');
                                       const cleanName = v.name.replace(/Google|Microsoft|Apple|Desktop|Natural|Neural/g, '').trim();
                                       
                                       return (
                                         <option key={`${v.name}-${v.lang}-${i}`} value={i} className="bg-[#1a1a1c]">
-                                          {cleanName} {type} {isNatural ? 'HD' : ''}
+                                          {cleanName} {type} {isNatural ? '✨' : ''}
                                         </option>
                                       );
                                     })
