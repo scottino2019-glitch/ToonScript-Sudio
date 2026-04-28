@@ -21,12 +21,8 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import html2canvas from 'html2canvas';
 import { BACKGROUNDS, CHARACTERS, Dialogue, VideoProject } from './constants';
-
-// Initialize Gemini AI
-const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 // --- Character Component ---
 interface CharacterAvatarProps {
@@ -236,6 +232,8 @@ export default function App() {
 
   const displayStreamRef = useRef<MediaStream | null>(null);
 
+  const [recordingPreviewUrl, setRecordingPreviewUrl] = useState<string | null>(null);
+
   const startRecording = async () => {
     if (!stageRef.current) return;
     
@@ -244,12 +242,10 @@ export default function App() {
     try {
       // Step 0: Inform user about audio sharing
       const userWantsAudio = confirm(
-        "🎬 ISTRUZIONI PER IL VIDEO:\n\n" +
-        "Per includere l'audio delle voci, nel prossimo passaggio DEVI:\n" +
-        "1. Scegliere 'Questa scheda' (This tab).\n" +
-        "2. Spuntare 'Condividi audio della scheda' (Share tab audio).\n" +
-        "3. Cliccare 'Condividi'.\n\n" +
-        "Se non lo vedi, assicurati di usare Chrome o Edge."
+        "🎬 ISTRUZIONI PER LA REGISTRAZIONE:\n\n" +
+        "1. Per l'AUDIO: Nel prossimo passaggio seleziona 'Questa scheda' e SPUNTA 'Condividi audio della scheda'.\n" +
+        "2. Per il VIDEO: Se vedi uno schermo nero, assicurati che i personaggi siano caricati completamente.\n\n" +
+        "Vuoi iniziare?"
       );
 
       if (!userWantsAudio) return;
@@ -266,20 +262,25 @@ export default function App() {
 
       const audioTrack = displayStreamRef.current.getAudioTracks()[0];
       if (!audioTrack) {
-        alert("ATTENZIONE: Hai condiviso lo schermo senza audio. Il video sarà muto.");
+        const proceedWithoutAudio = confirm("Non hai condiviso l'audio della scheda. Il video sarà completamente silenzioso. Vuoi procedere comunque?");
+        if (!proceedWithoutAudio) {
+          displayStreamRef.current.getTracks().forEach(t => t.stop());
+          displayStreamRef.current = null;
+          return;
+        }
       }
 
-      // Stop the video track from displayMedia immediately
+      // Stop the video track from displayMedia immediately as we use html2canvas for video
       displayStreamRef.current.getVideoTracks().forEach(t => t.stop());
 
       // Step 2: Set up Canvas capture
       const captureCanvas = document.createElement('canvas');
       captureCanvas.width = 1280;
       captureCanvas.height = 720;
-      const ctx = captureCanvas.getContext('2d');
+      const ctx = captureCanvas.getContext('2d', { alpha: false });
       if (!ctx) return;
 
-      // Initial clear
+      // Initial background
       ctx.fillStyle = '#1a1a1c';
       ctx.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
 
@@ -289,10 +290,10 @@ export default function App() {
       
       combinedStream = new MediaStream(tracks);
 
-      // MimeType fallback list
+      // MimeType fallback
       const mimeTypes = [
-        'video/webm;codecs=vp9,opus',
         'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=h264,opus',
         'video/webm',
         'video/mp4'
       ];
@@ -308,6 +309,7 @@ export default function App() {
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(combinedStream, { 
         mimeType: selectedMimeType || undefined,
+        videoBitsPerSecond: 2500000 
       });
       
       mediaRecorder.ondataavailable = (e) => {
@@ -316,14 +318,15 @@ export default function App() {
       
       mediaRecorder.onstop = () => {
         setIsRecording(false);
-        // Stop ALL tracks from the display stream to remove the "Sharing screen" notice
+        setRecordingPreviewUrl(null);
+        
         if (displayStreamRef.current) {
           displayStreamRef.current.getTracks().forEach(track => track.stop());
           displayStreamRef.current = null;
         }
 
         if (recordedChunksRef.current.length === 0) {
-          alert("Errore: La registrazione è vuota. Riprova assicurandoti di aver seguito le istruzioni.");
+          alert("Errore: Registrazione fallita. Non sono stati catturati dati.");
           return;
         }
 
@@ -340,14 +343,14 @@ export default function App() {
         setTimeout(() => {
           document.body.removeChild(a);
           window.URL.revokeObjectURL(url);
-        }, 500);
+        }, 1000);
       };
 
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start(1000); 
       setIsRecording(true);
 
-      // Improved rendering loop
+      // Rendering loop with preview
       let lastFrameTime = 0;
       const frameRate = 12; 
       const interval = 1000 / frameRate;
@@ -364,13 +367,23 @@ export default function App() {
               scale: 1, 
               backgroundColor: '#1a1a1c',
               logging: false,
-              imageTimeout: 30000, // Long timeout for character loading
-              ignoreElements: (el) => el.classList.contains('pointer-events-none') || el.classList.contains('export-ignore')
+              imageTimeout: 30000,
+              onclone: (clonedDoc) => {
+                // Ensure characters are visible in clone
+                const stage = clonedDoc.querySelector('[ref="stageRef"]');
+                if (stage) (stage as HTMLElement).style.opacity = '1';
+              }
             });
             ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
+            
+            // Periodically update a preview for the UI
+            if (timestamp % 500 < 100) {
+               setRecordingPreviewUrl(captureCanvas.toDataURL('image/jpeg', 0.6));
+            }
+            
             lastFrameTime = timestamp;
           } catch (err) {
-            console.error("Frame capture error:", err);
+            console.error("Capture bug:", err);
           } finally {
             isCapturingFrame = false;
           }
@@ -383,15 +396,17 @@ export default function App() {
       
       requestAnimationFrame(recordFrame);
       
-      // Delay playback slightly to allow recorder to stabilize and initial frame to be captured
+      // Delay playback slightly to allow recorder to stabilize
       setTimeout(() => {
         if (isRecordingRef.current) playSequence(false);
-      }, 2000);
+      }, 3000);
 
     } catch (err) {
       console.warn("Registrazione annullata", err);
       setIsRecording(false);
-      displayStreamRef.current?.getTracks().forEach(t => t.stop());
+      if (displayStreamRef.current) {
+        displayStreamRef.current.getTracks().forEach(t => t.stop());
+      }
     }
   };
 
@@ -530,39 +545,26 @@ export default function App() {
 
     setIsTranslating(id);
     try {
-      const langNames: Record<string, string> = {
-        'it-IT': 'Italiano',
-        'en-US': 'English (US)',
-        'en-GB': 'English (UK)',
-        'fr-FR': 'Français',
-        'es-ES': 'Español',
-        'de-DE': 'Deutsch',
-        'ja-JP': '日本語'
-      };
-
-      const targetLangName = langNames[targetLang] || targetLang;
-
-      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const prompt = `Traduci il seguente testo in ${targetLangName}. 
-        Restituisci esclusivamente il testo tradotto, senza commenti, spiegazioni o virgolette.
-        Testo da tradurre: ${dialogue.text}`;
-
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const translatedText = response.text().trim();
+      const targetShort = targetLang.split('-')[0];
+      // Endpoint gratuito di Google Translate usato per traduzioni rapide
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${targetShort}&dt=t&q=${encodeURIComponent(dialogue.text)}`;
       
-      if (translatedText) {
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data && data[0] && data[0][0] && data[0][0][0]) {
+        const translatedText = data[0].map((s: any) => s[0]).join('');
+        
         updateDialogue(id, { 
           text: translatedText,
           lang: targetLang
         });
       } else {
-        // Fallback for empty response
-        console.warn("IA returned empty translation");
+        throw new Error("Risposta non valida da Google Translate");
       }
     } catch (error) {
       console.error("Translation error:", error);
-      alert("Errore nella traduzione. Riprova tra poco.");
+      alert("Errore nella traduzione. Riprova.");
     } finally {
       setIsTranslating(null);
     }
@@ -738,11 +740,23 @@ export default function App() {
         <main className="flex-1 flex flex-col p-10 bg-[#0e0e10] overflow-y-auto custom-scrollbar">
           {/* Preview Canvas */}
           <div className="relative aspect-video rounded-[2.5rem] overflow-hidden border-[10px] border-[#1a1a1c] shadow-2xl bg-[#2a2a2e] group shrink-0">
+            {/* Recording Preview Overlay */}
+            {isRecording && recordingPreviewUrl && (
+              <div className="absolute top-4 right-4 w-48 aspect-video border-2 border-pink-500 rounded-lg overflow-hidden shadow-2xl z-50 pointer-events-none">
+                <img src={recordingPreviewUrl} alt="Recording Preview" className="w-full h-full object-cover" />
+                <div className="absolute top-2 left-2 flex items-center gap-1.5">
+                  <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-[8px] font-black uppercase text-white bg-black/50 px-1 rounded">LIVE RECO</span>
+                </div>
+              </div>
+            )}
+
             {/* The actual stage */}
             <div 
               ref={stageRef}
               className="absolute inset-0 flex items-end justify-around px-20 pb-16 transition-all duration-1000 overflow-hidden"
               style={{ backgroundColor: '#1a1a1c' }}
+              data-html2canvas-ignore="false"
             >
               {/* Background Image */}
               {activeBackground && (
@@ -751,11 +765,15 @@ export default function App() {
                   alt="" 
                   className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                   crossOrigin="anonymous"
+                  style={{ minWidth: '100%', minHeight: '100%' }}
                 />
               )}
               
-              {/* Overlay to dim background for characters and text */}
-              <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] pointer-events-none"></div>
+              {/* Overlay - Simplified for recording to avoid black screen */}
+              <div 
+                className="absolute inset-0 bg-black/30 pointer-events-none"
+                style={{ mixBaseline: 'multiply' }}
+              ></div>
 
               {/* Characters */}
               <div className="relative w-full h-full flex items-end justify-around z-10">
