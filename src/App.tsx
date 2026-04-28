@@ -18,7 +18,8 @@ import {
   StopCircle,
   RefreshCw,
   Languages,
-  Loader2
+  Loader2,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
@@ -584,7 +585,7 @@ export default function App() {
   return (
     <div className="h-screen bg-[#121214] text-white font-sans flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="h-16 border-b border-white/10 flex items-center justify-between px-8 bg-[#1a1a1c] shrink-0">
+      <header className={`h-16 border-b border-white/10 flex items-center justify-between px-8 bg-[#1a1a1c] shrink-0 transition-all duration-500 ${isPlaying ? '-translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100'}`}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-gradient-to-tr from-yellow-400 to-pink-500 rounded-lg flex items-center justify-center">
             <Video size={18} className="text-white" />
@@ -649,7 +650,7 @@ export default function App() {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Sidebar: Assets */}
-        <aside className="w-80 border-r border-white/10 flex flex-col bg-[#161618] overflow-y-auto custom-scrollbar">
+        <aside className={`w-80 border-r border-white/10 flex flex-col bg-[#161618] overflow-y-auto custom-scrollbar transition-all duration-500 ${isPlaying ? '-translate-x-full opacity-0 pointer-events-none' : 'translate-x-0 opacity-100'}`}>
           <div className="p-8 space-y-10">
             {/* Characters Selection */}
             <section>
@@ -732,9 +733,23 @@ export default function App() {
         </aside>
 
         {/* Main Workspace */}
-        <main className="flex-1 flex flex-col p-10 bg-[#0e0e10] overflow-y-auto custom-scrollbar">
+        <main className={`flex-1 flex flex-col p-10 bg-[#0e0e10] overflow-y-auto custom-scrollbar transition-all duration-500 ${isPlaying ? 'p-0 bg-black' : 'p-10'}`}>
+          {/* Cinema Mode Exit button */}
+          {isPlaying && (
+            <button 
+              onClick={() => {
+                window.speechSynthesis.cancel();
+                setIsPlaying(false);
+                setCurrentDialogueIndex(-1);
+              }}
+              className="fixed top-8 right-8 z-[100] bg-white text-black px-6 py-3 rounded-full font-black text-xs uppercase tracking-widest shadow-2xl hover:scale-110 transition-all flex items-center gap-2"
+            >
+              <X size={16} /> Interrompi
+            </button>
+          )}
+
           {/* Preview Canvas */}
-          <div className="relative aspect-video rounded-[2.5rem] overflow-hidden border-[10px] border-[#1a1a1c] shadow-2xl bg-[#2a2a2e] group shrink-0">
+          <div className={`relative aspect-video rounded-[2.5rem] overflow-hidden border-[10px] border-[#1a1a1c] shadow-2xl bg-[#2a2a2e] group shrink-0 transition-all duration-700 ${isPlaying ? 'rounded-none border-0 aspect-auto h-full w-full' : ''}`}>
             {/* Recording Preview Overlay */}
             {isRecording && recordingPreviewUrl && (
               <div className="absolute top-4 right-4 w-48 aspect-video border-2 border-pink-500 rounded-lg overflow-hidden shadow-2xl z-50 pointer-events-none">
