@@ -39,6 +39,7 @@ interface CharacterAvatarProps {
 
 const CharacterAvatar = ({ id, color, image, isSpeaking }: CharacterAvatarProps) => {
   const [hasError, setHasError] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   return (
     <motion.div
@@ -56,12 +57,12 @@ const CharacterAvatar = ({ id, color, image, isSpeaking }: CharacterAvatarProps)
             <img 
               src={image} 
               alt="Character" 
-              className="max-w-full max-h-full object-contain"
+              className={`max-w-full max-h-full object-contain transition-opacity duration-300 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
               referrerPolicy="no-referrer"
               crossOrigin="anonymous"
               loading="eager"
-              onLoad={() => console.log(`Image loaded: ${id}`)}
-              onError={() => {
+              onLoad={() => setIsLoaded(true)}
+              onError={(e) => {
                 console.warn(`Failed to load image: ${image}`);
                 setHasError(true);
               }}
@@ -72,6 +73,11 @@ const CharacterAvatar = ({ id, color, image, isSpeaking }: CharacterAvatarProps)
               className="w-32 h-32 rounded-full flex items-center justify-center text-4xl border-4 border-white shadow-xl"
             >
               👤
+            </div>
+          )}
+          {!isLoaded && !hasError && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 className="animate-spin text-white/20" />
             </div>
           )}
         </div>
@@ -243,7 +249,7 @@ export default function App() {
         "1. Scegliere 'Questa scheda' (This tab).\n" +
         "2. Spuntare 'Condividi audio della scheda' (Share tab audio).\n" +
         "3. Cliccare 'Condividi'.\n\n" +
-        "Se non lo vedi, prova a usare Chrome o Edge."
+        "Se non lo vedi, assicurati di usare Chrome o Edge."
       );
 
       if (!userWantsAudio) return;
@@ -273,15 +279,35 @@ export default function App() {
       const ctx = captureCanvas.getContext('2d');
       if (!ctx) return;
 
+      // Initial clear
+      ctx.fillStyle = '#1a1a1c';
+      ctx.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
+
       const canvasStream = captureCanvas.captureStream(24);
       const tracks = [canvasStream.getVideoTracks()[0]];
       if (audioTrack) tracks.push(audioTrack);
       
       combinedStream = new MediaStream(tracks);
 
+      // MimeType fallback list
+      const mimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4'
+      ];
+      
+      let selectedMimeType = '';
+      for (const mime of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+          selectedMimeType = mime;
+          break;
+        }
+      }
+
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(combinedStream, { 
-        mimeType: 'video/webm', // Best compatibility
+        mimeType: selectedMimeType || undefined,
       });
       
       mediaRecorder.ondataavailable = (e) => {
@@ -296,47 +322,57 @@ export default function App() {
           displayStreamRef.current = null;
         }
 
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        if (recordedChunksRef.current.length === 0) {
+          alert("Errore: La registrazione è vuota. Riprova assicurandoti di aver seguito le istruzioni.");
+          return;
+        }
+
+        const blob = new Blob(recordedChunksRef.current, { type: selectedMimeType || 'video/webm' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        a.download = `toonscript-${Date.now()}.webm`;
+        const extension = selectedMimeType.includes('mp4') ? 'mp4' : 'webm';
+        a.download = `toonscript-${Date.now()}.${extension}`;
         document.body.appendChild(a);
         a.click();
         
         setTimeout(() => {
           document.body.removeChild(a);
           window.URL.revokeObjectURL(url);
-        }, 100);
+        }, 500);
       };
 
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start(1000); 
       setIsRecording(true);
 
-      // Rendering loop
+      // Improved rendering loop
       let lastFrameTime = 0;
       const frameRate = 12; 
       const interval = 1000 / frameRate;
+      let isCapturingFrame = false;
 
       const recordFrame = async (timestamp: number) => {
         if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive' || !isRecordingRef.current) return;
         
-        if (timestamp - lastFrameTime >= interval) {
+        if (timestamp - lastFrameTime >= interval && !isCapturingFrame) {
+          isCapturingFrame = true;
           try {
             const canvas = await html2canvas(stageRef.current!, {
               useCORS: true,
               scale: 1, 
               backgroundColor: '#1a1a1c',
               logging: false,
-              imageTimeout: 10000,
+              imageTimeout: 30000, // Long timeout for character loading
               ignoreElements: (el) => el.classList.contains('pointer-events-none') || el.classList.contains('export-ignore')
             });
             ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
             lastFrameTime = timestamp;
           } catch (err) {
             console.error("Frame capture error:", err);
+          } finally {
+            isCapturingFrame = false;
           }
         }
         
@@ -347,9 +383,10 @@ export default function App() {
       
       requestAnimationFrame(recordFrame);
       
+      // Delay playback slightly to allow recorder to stabilize and initial frame to be captured
       setTimeout(() => {
         if (isRecordingRef.current) playSequence(false);
-      }, 1000);
+      }, 2000);
 
     } catch (err) {
       console.warn("Registrazione annullata", err);
@@ -519,9 +556,13 @@ export default function App() {
           text: translatedText,
           lang: targetLang
         });
+      } else {
+        // Fallback for empty response
+        console.warn("IA returned empty translation");
       }
     } catch (error) {
       console.error("Translation error:", error);
+      alert("Errore nella traduzione. Riprova tra poco.");
     } finally {
       setIsTranslating(null);
     }
@@ -700,14 +741,19 @@ export default function App() {
             {/* The actual stage */}
             <div 
               ref={stageRef}
-              className="absolute inset-0 flex items-end justify-around px-20 pb-16 transition-all duration-1000"
-              style={{ 
-                backgroundImage: `url(${activeBackground?.style.image}), ${activeBackground?.style.gradient || 'none'}`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-                backgroundColor: '#1a1a1c'
-              }}
+              className="absolute inset-0 flex items-end justify-around px-20 pb-16 transition-all duration-1000 overflow-hidden"
+              style={{ backgroundColor: '#1a1a1c' }}
             >
+              {/* Background Image */}
+              {activeBackground && (
+                <img 
+                  src={activeBackground.style.image} 
+                  alt="" 
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                  crossOrigin="anonymous"
+                />
+              )}
+              
               {/* Overlay to dim background for characters and text */}
               <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] pointer-events-none"></div>
 
@@ -776,9 +822,10 @@ export default function App() {
                   onClick={translateAll}
                   disabled={isTranslating !== null}
                   className="px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 transition-all flex items-center gap-2"
+                  title="Traduzione potenziata da Google AI"
                 >
                   <Languages size={14} />
-                  Traduci Tutto
+                  Google AI Translate
                 </button>
                 <button 
                   onClick={addDialogue}
