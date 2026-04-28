@@ -37,49 +37,62 @@ interface CharacterAvatarProps {
   key?: any;
 }
 
-const CharacterAvatar = ({ id, color, image, isSpeaking }: CharacterAvatarProps) => (
-  <motion.div
-    animate={isSpeaking ? { 
-      y: [0, -15, 0], 
-      scale: [1, 1.1, 1],
-    } : { y: 0, scale: 1 }}
-    transition={isSpeaking ? { repeat: Infinity, duration: 0.4 } : {}}
-    className="relative flex flex-col items-center"
-  >
-    {/* The Character Image */}
-    <div className="relative group">
-      <div className={`w-48 h-64 flex items-center justify-center overflow-hidden transition-all ${isSpeaking ? 'drop-shadow-[0_0_20px_white]' : 'drop-shadow-lg'}`}>
-        <img 
-          src={image} 
-          alt="Character" 
-          className="max-w-full max-h-full object-contain"
-          referrerPolicy="no-referrer"
-          crossOrigin="anonymous"
-          onError={(e) => {
-            // High quality graphical fallback
-            if (!e.currentTarget.src.includes('bottts')) {
-              e.currentTarget.src = `https://api.dicebear.com/9.x/bottts/png?seed=${encodeURIComponent(id)}&backgroundColor=b6e3f4`;
-            }
-          }}
-        />
+const CharacterAvatar = ({ id, color, image, isSpeaking }: CharacterAvatarProps) => {
+  const [hasError, setHasError] = useState(false);
+
+  return (
+    <motion.div
+      animate={isSpeaking ? { 
+        y: [0, -15, 0], 
+        scale: [1, 1.1, 1],
+      } : { y: 0, scale: 1 }}
+      transition={isSpeaking ? { repeat: Infinity, duration: 0.4 } : {}}
+      className="relative flex flex-col items-center"
+    >
+      {/* The Character Image */}
+      <div className="relative group">
+        <div className={`w-48 h-64 flex items-center justify-center overflow-hidden transition-all ${isSpeaking ? 'drop-shadow-[0_0_20px_white]' : 'drop-shadow-lg'}`}>
+          {!hasError ? (
+            <img 
+              src={image} 
+              alt="Character" 
+              className="max-w-full max-h-full object-contain"
+              referrerPolicy="no-referrer"
+              crossOrigin="anonymous"
+              loading="eager"
+              onLoad={() => console.log(`Image loaded: ${id}`)}
+              onError={() => {
+                console.warn(`Failed to load image: ${image}`);
+                setHasError(true);
+              }}
+            />
+          ) : (
+            <div 
+              style={{ backgroundColor: color }}
+              className="w-32 h-32 rounded-full flex items-center justify-center text-4xl border-4 border-white shadow-xl"
+            >
+              👤
+            </div>
+          )}
+        </div>
+        
+        {/* Speaking Indicator */}
+        <AnimatePresence>
+          {isSpeaking && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0 }}
+              className="absolute -top-12 left-1/2 -translate-x-1/2 bg-white text-black px-4 py-1.5 rounded-full text-[12px] font-black uppercase tracking-widest shadow-2xl z-20 whitespace-nowrap"
+            >
+              Sta parlando...
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-      
-      {/* Speaking Indicator */}
-      <AnimatePresence>
-        {isSpeaking && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0 }}
-            className="absolute -top-12 left-1/2 -translate-x-1/2 bg-white text-black px-4 py-1.5 rounded-full text-[12px] font-black uppercase tracking-widest shadow-2xl z-20 whitespace-nowrap"
-          >
-            Sta parlando...
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  </motion.div>
-);
+    </motion.div>
+  );
+};
 
 export default function App() {
   const [project, setProject] = useState<VideoProject>({
@@ -215,42 +228,52 @@ export default function App() {
     }));
   };
 
+  const displayStreamRef = useRef<MediaStream | null>(null);
+
   const startRecording = async () => {
     if (!stageRef.current) return;
     
     let combinedStream: MediaStream | null = null;
-    let displayStream: MediaStream | null = null;
 
     try {
+      // Step 0: Inform user about audio sharing
+      const userWantsAudio = confirm(
+        "🎬 ISTRUZIONI PER IL VIDEO:\n\n" +
+        "Per includere l'audio delle voci, nel prossimo passaggio DEVI:\n" +
+        "1. Scegliere 'Questa scheda' (This tab).\n" +
+        "2. Spuntare 'Condividi audio della scheda' (Share tab audio).\n" +
+        "3. Cliccare 'Condividi'.\n\n" +
+        "Se non lo vedi, prova a usare Chrome o Edge."
+      );
+
+      if (!userWantsAudio) return;
+
       // Step 1: Capture the screen/tab for AUDIO
-      // Browsers requires user interaction for this
-      displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          displaySurface: "browser",
-        },
+      displayStreamRef.current = await navigator.mediaDevices.getDisplayMedia({
+        video: { displaySurface: "browser" },
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
-          //@ts-ignore - Some browsers support this to suggest tab audio
-          suppressLocalAudioPlayback: false
         }
       } as any);
 
-      const audioTrack = displayStream.getAudioTracks()[0];
+      const audioTrack = displayStreamRef.current.getAudioTracks()[0];
       if (!audioTrack) {
-        alert("ATTENZIONE: Hai condiviso lo schermo ma non l'audio della scheda. Il video non avrà suono. Assicurati di spuntare 'Condividi audio' (o 'Share audio') prima di confermare!");
+        alert("ATTENZIONE: Hai condiviso lo schermo senza audio. Il video sarà muto.");
       }
 
-      // Step 2: Use a canvas stream for the video to keep it clean
+      // Stop the video track from displayMedia immediately
+      displayStreamRef.current.getVideoTracks().forEach(t => t.stop());
+
+      // Step 2: Set up Canvas capture
       const captureCanvas = document.createElement('canvas');
       captureCanvas.width = 1280;
       captureCanvas.height = 720;
       const ctx = captureCanvas.getContext('2d');
       if (!ctx) return;
 
-      const canvasStream = captureCanvas.captureStream(30);
-      
+      const canvasStream = captureCanvas.captureStream(24);
       const tracks = [canvasStream.getVideoTracks()[0]];
       if (audioTrack) tracks.push(audioTrack);
       
@@ -258,8 +281,7 @@ export default function App() {
 
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(combinedStream, { 
-        mimeType: 'video/webm;codecs=vp9,opus',
-        videoBitsPerSecond: 5000000 
+        mimeType: 'video/webm', // Best compatibility
       });
       
       mediaRecorder.ondataavailable = (e) => {
@@ -267,25 +289,35 @@ export default function App() {
       };
       
       mediaRecorder.onstop = () => {
-        displayStream?.getTracks().forEach(t => t.stop());
-        
+        setIsRecording(false);
+        // Stop ALL tracks from the display stream to remove the "Sharing screen" notice
+        if (displayStreamRef.current) {
+          displayStreamRef.current.getTracks().forEach(track => track.stop());
+          displayStreamRef.current = null;
+        }
+
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
+        a.style.display = 'none';
         a.href = url;
-        a.download = `${project.name.toLowerCase().replace(/\s+/g, '-')}.webm`;
+        a.download = `toonscript-${Date.now()}.webm`;
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
-        setIsRecording(false);
+        
+        setTimeout(() => {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }, 100);
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
+      mediaRecorder.start(1000); 
       setIsRecording(true);
 
-      // Start rendering loop for the canvas
+      // Rendering loop
       let lastFrameTime = 0;
-      const frameRate = 12; // Sufficient for this type of animation
+      const frameRate = 12; 
       const interval = 1000 / frameRate;
 
       const recordFrame = async (timestamp: number) => {
@@ -298,7 +330,7 @@ export default function App() {
               scale: 1, 
               backgroundColor: '#1a1a1c',
               logging: false,
-              imageTimeout: 30000, // Increased timeout for slow assets
+              imageTimeout: 10000,
               ignoreElements: (el) => el.classList.contains('pointer-events-none') || el.classList.contains('export-ignore')
             });
             ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
@@ -308,24 +340,21 @@ export default function App() {
           }
         }
         
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive' && isRecordingRef.current) {
+        if (isRecordingRef.current) {
           requestAnimationFrame(recordFrame);
         }
       };
       
       requestAnimationFrame(recordFrame);
       
-      // Delay playback slightly to allow recorder to stabilize
       setTimeout(() => {
-        if (isRecordingRef.current) {
-          playSequence(false);
-        }
+        if (isRecordingRef.current) playSequence(false);
       }, 1000);
 
     } catch (err) {
-      console.warn("Registrazione annullata o fallita", err);
+      console.warn("Registrazione annullata", err);
       setIsRecording(false);
-      return;
+      displayStreamRef.current?.getTracks().forEach(t => t.stop());
     }
   };
 
@@ -477,24 +506,20 @@ export default function App() {
       const targetLangName = langNames[targetLang] || targetLang;
 
       const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent(`Traduci la seguente frase in ${targetLangName}. 
-        Restituisci SOLO il testo tradotto, senza virgolette o spiegazioni. 
-        Contesto: Uno script per un video animato di ToonScript.
-        Testo: "${dialogue.text}"`);
+      const prompt = `Traduci il seguente testo in ${targetLangName}. 
+        Restituisci esclusivamente il testo tradotto, senza commenti, spiegazioni o virgolette.
+        Testo da tradurre: ${dialogue.text}`;
 
+      const result = await model.generateContent(prompt);
       const response = await result.response;
-      const text = response.text();
+      const translatedText = response.text().trim();
       
-      if (!text) {
-        throw new Error("Risposta vuota dall'IA");
+      if (translatedText) {
+        updateDialogue(id, { 
+          text: translatedText,
+          lang: targetLang
+        });
       }
-
-      const translatedText = text.trim();
-      
-      updateDialogue(id, { 
-        text: translatedText,
-        lang: targetLang
-      });
     } catch (error) {
       console.error("Translation error:", error);
     } finally {
