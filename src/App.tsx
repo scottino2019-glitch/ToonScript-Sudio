@@ -54,10 +54,11 @@ const CharacterAvatar = ({ id, color, image, isSpeaking }: { id: string; color: 
           alt="Character" 
           className="max-w-full max-h-full object-contain"
           referrerPolicy="no-referrer"
+          crossOrigin="anonymous"
           onError={(e) => {
             // High quality graphical fallback
             if (!e.currentTarget.src.includes('bottts')) {
-              e.currentTarget.src = `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(id)}&backgroundColor=b6e3f4`;
+              e.currentTarget.src = `https://api.dicebear.com/9.x/bottts/png?seed=${encodeURIComponent(id)}&backgroundColor=b6e3f4`;
             }
           }}
         />
@@ -210,11 +211,15 @@ export default function App() {
 
   const playSequence = async (recording: boolean = false) => {
     if (isPlaying) return;
-    setIsPlaying(true);
     
     if (recording) {
+      if (!confirm("AVVISO AUDIO: La registrazione video non cattura l'audio delle voci sintetiche a causa di limitazioni del browser. Solo il video verrà salvato. Vuoi procedere?")) {
+        return;
+      }
       startRecording();
     }
+
+    setIsPlaying(true);
 
     const speakerQueue = [...project.dialogues];
     
@@ -304,9 +309,11 @@ export default function App() {
           try {
             const canvas = await html2canvas(stageRef.current!, {
               useCORS: true,
-              scale: 1, // Reduced scale for performance
+              allowTaint: true,
+              scale: 1, 
               backgroundColor: '#1a1a1c',
               logging: false,
+              imageTimeout: 0,
               ignoreElements: (el) => el.classList.contains('pointer-events-none')
             });
             ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
@@ -564,6 +571,7 @@ export default function App() {
                         alt={char.name} 
                         className="w-12 h-12 object-contain mb-2"
                         referrerPolicy="no-referrer"
+                        crossOrigin="anonymous"
                         onError={(e) => {
                           e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(char.name)}&background=${char.color.replace('#', '')}&color=fff`;
                         }}
