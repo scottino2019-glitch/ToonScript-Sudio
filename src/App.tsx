@@ -237,30 +237,26 @@ export default function App() {
   const startRecording = async () => {
     if (!stageRef.current) return;
     
-    let combinedStream: MediaStream | null = null;
-
     try {
       // Step 0: Inform user about audio sharing
       const userWantsAudio = confirm(
         "🎬 ISTRUZIONI PER LA REGISTRAZIONE:\n\n" +
-        "1. Per l'AUDIO: Nel prossimo passaggio seleziona 'Questa scheda' e SPUNTA 'Condividi audio della scheda'.\n" +
-        "2. Per il VIDEO: Se vedi uno schermo nero, assicurati che i personaggi siano caricati completamente.\n\n" +
-        "Vuoi iniziare?"
+        "1. Nella finestra che si aprirà, seleziona 'QUESTA SCHEDA'.\n" +
+        "2. DEVI SPUNTARE la casella 'Condividi audio della scheda' in basso a sinistra.\n" +
+        "3. Clicca su 'Condividi'.\n\n" +
+        "Se vedi uno schermo nero nell'anteprima in alto a destra, ricarica la pagina."
       );
 
       if (!userWantsAudio) return;
 
       // Step 1: Capture the screen/tab for AUDIO
       displayStreamRef.current = await navigator.mediaDevices.getDisplayMedia({
-        video: { 
-          displaySurface: "browser",
-        },
+        video: { displaySurface: "browser" },
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
         },
-        // Suggest the browser to prioritize the current tab
         //@ts-ignore
         preferCurrentTab: true,
         //@ts-ignore
@@ -269,15 +265,10 @@ export default function App() {
 
       const audioTrack = displayStreamRef.current.getAudioTracks()[0];
       if (!audioTrack) {
-        const proceedWithoutAudio = confirm("Non hai condiviso l'audio della scheda. Il video sarà completamente silenzioso. Vuoi procedere comunque?");
-        if (!proceedWithoutAudio) {
-          displayStreamRef.current.getTracks().forEach(t => t.stop());
-          displayStreamRef.current = null;
-          return;
-        }
+        alert("ATTENZIONE: Non hai spuntato 'Condividi audio'. Il video sarà muto!");
       }
 
-      // Stop the video track from displayMedia immediately as we use html2canvas for video
+      // Stop the video track from displayMedia as we use html2canvas for video
       displayStreamRef.current.getVideoTracks().forEach(t => t.stop());
 
       // Step 2: Set up Canvas capture
@@ -287,7 +278,7 @@ export default function App() {
       const ctx = captureCanvas.getContext('2d', { alpha: false });
       if (!ctx) return;
 
-      // Initial background
+      // Initial clear
       ctx.fillStyle = '#1a1a1c';
       ctx.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
 
@@ -295,12 +286,11 @@ export default function App() {
       const tracks = [canvasStream.getVideoTracks()[0]];
       if (audioTrack) tracks.push(audioTrack);
       
-      combinedStream = new MediaStream(tracks);
+      const combinedStream = new MediaStream(tracks);
 
-      // MimeType fallback
+      // MimeType selection
       const mimeTypes = [
         'video/webm;codecs=vp8,opus',
-        'video/webm;codecs=h264,opus',
         'video/webm',
         'video/mp4'
       ];
@@ -316,7 +306,7 @@ export default function App() {
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(combinedStream, { 
         mimeType: selectedMimeType || undefined,
-        videoBitsPerSecond: 2500000 
+        videoBitsPerSecond: 3000000 
       });
       
       mediaRecorder.ondataavailable = (e) => {
@@ -333,7 +323,7 @@ export default function App() {
         }
 
         if (recordedChunksRef.current.length === 0) {
-          alert("Errore: Registrazione fallita. Non sono stati catturati dati.");
+          alert("Errore: La registrazione non ha catturato dati.");
           return;
         }
 
@@ -342,7 +332,7 @@ export default function App() {
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        const extension = selectedMimeType.includes('mp4') ? 'mp4' : 'webm';
+        const extension = (selectedMimeType && selectedMimeType.includes('mp4')) ? 'mp4' : 'webm';
         a.download = `toonscript-${Date.now()}.${extension}`;
         document.body.appendChild(a);
         a.click();
@@ -357,7 +347,7 @@ export default function App() {
       mediaRecorder.start(1000); 
       setIsRecording(true);
 
-      // Rendering loop with preview
+      // Rendering loop
       let lastFrameTime = 0;
       const frameRate = 12; 
       const interval = 1000 / frameRate;
@@ -369,28 +359,27 @@ export default function App() {
         if (timestamp - lastFrameTime >= interval && !isCapturingFrame) {
           isCapturingFrame = true;
           try {
-            const canvas = await html2canvas(stageRef.current!, {
+            const el = stageRef.current;
+            if (!el) return;
+
+            const canvas = await html2canvas(el, {
               useCORS: true,
               scale: 1, 
               backgroundColor: '#1a1a1c',
               logging: false,
               imageTimeout: 30000,
-              onclone: (clonedDoc) => {
-                // Ensure characters are visible in clone
-                const stage = clonedDoc.querySelector('[ref="stageRef"]');
-                if (stage) (stage as HTMLElement).style.opacity = '1';
-              }
             });
+            
             ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
             
-            // Periodically update a preview for the UI
-            if (timestamp % 500 < 100) {
-               setRecordingPreviewUrl(captureCanvas.toDataURL('image/jpeg', 0.6));
+            // Update preview every half second
+            if (Math.floor(timestamp / 500) > Math.floor(lastFrameTime / 500)) {
+               setRecordingPreviewUrl(captureCanvas.toDataURL('image/jpeg', 0.5));
             }
             
             lastFrameTime = timestamp;
           } catch (err) {
-            console.error("Capture bug:", err);
+            console.error("Capture error:", err);
           } finally {
             isCapturingFrame = false;
           }
@@ -403,7 +392,6 @@ export default function App() {
       
       requestAnimationFrame(recordFrame);
       
-      // Delay playback slightly to allow recorder to stabilize
       setTimeout(() => {
         if (isRecordingRef.current) playSequence(false);
       }, 3000);
