@@ -100,6 +100,12 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [isTranslating, setIsTranslating] = useState<string | null>(null);
+  const isRecordingRef = useRef(false);
+
+  // Sync isRecording with ref
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
   
   const currentSpeakerId = currentDialogueIndex >= 0 ? project.dialogues[currentDialogueIndex]?.characterId : null;
   
@@ -283,17 +289,16 @@ export default function App() {
       const interval = 1000 / frameRate;
 
       const recordFrame = async (timestamp: number) => {
-        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return;
+        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive' || !isRecordingRef.current) return;
         
         if (timestamp - lastFrameTime >= interval) {
           try {
             const canvas = await html2canvas(stageRef.current!, {
               useCORS: true,
-              allowTaint: true,
               scale: 1, 
               backgroundColor: '#1a1a1c',
               logging: false,
-              imageTimeout: 15000, // Important for character loading
+              imageTimeout: 30000, // Increased timeout for slow assets
               ignoreElements: (el) => el.classList.contains('pointer-events-none') || el.classList.contains('export-ignore')
             });
             ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
@@ -303,15 +308,19 @@ export default function App() {
           }
         }
         
-        if (mediaRecorderRef.current.state !== 'inactive') {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive' && isRecordingRef.current) {
           requestAnimationFrame(recordFrame);
         }
       };
       
       requestAnimationFrame(recordFrame);
       
-      // Start the actual playback sequence
-      playSequence(false);
+      // Delay playback slightly to allow recorder to stabilize
+      setTimeout(() => {
+        if (isRecordingRef.current) {
+          playSequence(false);
+        }
+      }, 1000);
 
     } catch (err) {
       console.warn("Registrazione annullata o fallita", err);
@@ -362,7 +371,7 @@ export default function App() {
     setCurrentDialogueIndex(-1);
     setIsPlaying(false);
     
-    if (isRecording) {
+    if (isRecordingRef.current) {
       stopRecording();
     }
   };
@@ -371,6 +380,7 @@ export default function App() {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
+    setIsRecording(false);
   };
 
   const deleteProjectFromLibrary = (id: string) => {
@@ -469,10 +479,11 @@ export default function App() {
       const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
       const result = await model.generateContent(`Traduci la seguente frase in ${targetLangName}. 
         Restituisci SOLO il testo tradotto, senza virgolette o spiegazioni. 
-        Contesto: Uno script per un video animato.
+        Contesto: Uno script per un video animato di ToonScript.
         Testo: "${dialogue.text}"`);
 
-      const text = result.response.text();
+      const response = await result.response;
+      const text = response.text();
       
       if (!text) {
         throw new Error("Risposta vuota dall'IA");
