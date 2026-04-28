@@ -252,12 +252,19 @@ export default function App() {
 
       // Step 1: Capture the screen/tab for AUDIO
       displayStreamRef.current = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: "browser" },
+        video: { 
+          displaySurface: "browser",
+        },
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
-        }
+        },
+        // Suggest the browser to prioritize the current tab
+        //@ts-ignore
+        preferCurrentTab: true,
+        //@ts-ignore
+        selfBrowserSurface: "include"
       } as any);
 
       const audioTrack = displayStreamRef.current.getAudioTracks()[0];
