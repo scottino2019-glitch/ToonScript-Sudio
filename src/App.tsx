@@ -21,23 +21,23 @@ import {
   Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import html2canvas from 'html2canvas';
 import { BACKGROUNDS, CHARACTERS, Dialogue, VideoProject } from './constants';
 
-// Safe API Key access
-const getApiKey = () => {
-  try {
-    return (window as any).process?.env?.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
-  } catch (e) {
-    return "";
-  }
-};
-
-const ai = new GoogleGenAI({ apiKey: getApiKey() });
+// Initialize Gemini AI
+const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 // --- Character Component ---
-const CharacterAvatar = ({ id, color, image, isSpeaking }: { id: string; color: string; image: string; isSpeaking: boolean }) => (
+interface CharacterAvatarProps {
+  id: string;
+  color: string;
+  image: string;
+  isSpeaking: boolean;
+  key?: any;
+}
+
+const CharacterAvatar = ({ id, color, image, isSpeaking }: CharacterAvatarProps) => (
   <motion.div
     animate={isSpeaking ? { 
       y: [0, -15, 0], 
@@ -108,7 +108,7 @@ export default function App() {
   const recordedChunksRef = useRef<Blob[]>([]);
 
   const allCharacters = useMemo(() => {
-    return [...CHARACTERS, ...(customCharacters || [])];
+    return [...CHARACTERS, ...(customCharacters || [])] as { id: string, name: string, image: string, color: string, gender?: string }[];
   }, [customCharacters]);
 
   // Load voices and projects
@@ -209,18 +209,126 @@ export default function App() {
     }));
   };
 
-  const playSequence = async (recording: boolean = false) => {
+  const startRecording = async () => {
+    if (!stageRef.current) return;
+    
+    let combinedStream: MediaStream | null = null;
+    let displayStream: MediaStream | null = null;
+
+    try {
+      // Step 1: Capture the screen/tab for AUDIO
+      // Browsers requires user interaction for this
+      displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          displaySurface: "browser",
+        },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          //@ts-ignore - Some browsers support this to suggest tab audio
+          suppressLocalAudioPlayback: false
+        }
+      } as any);
+
+      const audioTrack = displayStream.getAudioTracks()[0];
+      if (!audioTrack) {
+        alert("ATTENZIONE: Hai condiviso lo schermo ma non l'audio della scheda. Il video non avrà suono. Assicurati di spuntare 'Condividi audio' (o 'Share audio') prima di confermare!");
+      }
+
+      // Step 2: Use a canvas stream for the video to keep it clean
+      const captureCanvas = document.createElement('canvas');
+      captureCanvas.width = 1280;
+      captureCanvas.height = 720;
+      const ctx = captureCanvas.getContext('2d');
+      if (!ctx) return;
+
+      const canvasStream = captureCanvas.captureStream(30);
+      
+      const tracks = [canvasStream.getVideoTracks()[0]];
+      if (audioTrack) tracks.push(audioTrack);
+      
+      combinedStream = new MediaStream(tracks);
+
+      recordedChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(combinedStream, { 
+        mimeType: 'video/webm;codecs=vp9,opus',
+        videoBitsPerSecond: 5000000 
+      });
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      
+      mediaRecorder.onstop = () => {
+        displayStream?.getTracks().forEach(t => t.stop());
+        
+        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${project.name.toLowerCase().replace(/\s+/g, '-')}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setIsRecording(false);
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+
+      // Start rendering loop for the canvas
+      let lastFrameTime = 0;
+      const frameRate = 12; // Sufficient for this type of animation
+      const interval = 1000 / frameRate;
+
+      const recordFrame = async (timestamp: number) => {
+        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return;
+        
+        if (timestamp - lastFrameTime >= interval) {
+          try {
+            const canvas = await html2canvas(stageRef.current!, {
+              useCORS: true,
+              allowTaint: true,
+              scale: 1, 
+              backgroundColor: '#1a1a1c',
+              logging: false,
+              imageTimeout: 15000, // Important for character loading
+              ignoreElements: (el) => el.classList.contains('pointer-events-none') || el.classList.contains('export-ignore')
+            });
+            ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
+            lastFrameTime = timestamp;
+          } catch (err) {
+            console.error("Frame capture error:", err);
+          }
+        }
+        
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          requestAnimationFrame(recordFrame);
+        }
+      };
+      
+      requestAnimationFrame(recordFrame);
+      
+      // Start the actual playback sequence
+      playSequence(false);
+
+    } catch (err) {
+      console.warn("Registrazione annullata o fallita", err);
+      setIsRecording(false);
+      return;
+    }
+  };
+
+  const playSequence = async (intentToRecord: boolean = false) => {
     if (isPlaying) return;
     
-    if (recording) {
-      if (!confirm("AVVISO AUDIO: La registrazione video non cattura l'audio delle voci sintetiche a causa di limitazioni del browser. Solo il video verrà salvato. Vuoi procedere?")) {
-        return;
-      }
-      startRecording();
+    if (intentToRecord) {
+      await startRecording();
+      return;
     }
 
     setIsPlaying(true);
-
     const speakerQueue = [...project.dialogues];
     
     for (let i = 0; i < speakerQueue.length; i++) {
@@ -254,85 +362,8 @@ export default function App() {
     setCurrentDialogueIndex(-1);
     setIsPlaying(false);
     
-    if (recording) {
+    if (isRecording) {
       stopRecording();
-    }
-  };
-
-  const startRecording = async () => {
-    if (!stageRef.current) return;
-    
-    try {
-      // Create a hidden canvas for recording
-      const captureCanvas = document.createElement('canvas');
-      captureCanvas.width = 1280;
-      captureCanvas.height = 720;
-      const ctx = captureCanvas.getContext('2d');
-      if (!ctx) return;
-
-      const stream = captureCanvas.captureStream(30);
-      setIsRecording(true);
-      recordedChunksRef.current = [];
-      
-      const mediaRecorder = new MediaRecorder(stream, { 
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 5000000 
-      });
-      
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${project.name.toLowerCase().replace(/\s+/g, '-')}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setIsRecording(false);
-      };
-
-      mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start();
-
-      // Recording loop - slower rate to allow rendering
-      let lastFrameTime = 0;
-      const frameRate = 10; // 10 fps is more realistic for html2canvas
-      const interval = 1000 / frameRate;
-
-      const recordFrame = async (timestamp: number) => {
-        if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') return;
-        
-        if (timestamp - lastFrameTime >= interval) {
-          try {
-            const canvas = await html2canvas(stageRef.current!, {
-              useCORS: true,
-              allowTaint: true,
-              scale: 1, 
-              backgroundColor: '#1a1a1c',
-              logging: false,
-              imageTimeout: 0,
-              ignoreElements: (el) => el.classList.contains('pointer-events-none')
-            });
-            ctx.drawImage(canvas, 0, 0, captureCanvas.width, captureCanvas.height);
-            lastFrameTime = timestamp;
-          } catch (err) {
-            console.error("Frame capture error:", err);
-          }
-        }
-        
-        if (mediaRecorderRef.current.state !== 'inactive') {
-          requestAnimationFrame(recordFrame);
-        }
-      };
-      
-      requestAnimationFrame(recordFrame);
-    } catch (err) {
-      console.error("Recording error:", err);
-      setIsRecording(false);
-      alert("Errore durante l'avvio della registrazione. Assicurati che il tuo browser supporti le API necessarie.");
     }
   };
 
@@ -435,15 +466,19 @@ export default function App() {
 
       const targetLangName = langNames[targetLang] || targetLang;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Traduci la seguente frase in ${targetLangName}. 
+      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const result = await model.generateContent(`Traduci la seguente frase in ${targetLangName}. 
         Restituisci SOLO il testo tradotto, senza virgolette o spiegazioni. 
         Contesto: Uno script per un video animato.
-        Testo: "${dialogue.text}"`,
-      });
+        Testo: "${dialogue.text}"`);
 
-      const translatedText = response.text?.trim() || dialogue.text;
+      const text = result.response.text();
+      
+      if (!text) {
+        throw new Error("Risposta vuota dall'IA");
+      }
+
+      const translatedText = text.trim();
       
       updateDialogue(id, { 
         text: translatedText,
@@ -813,14 +848,14 @@ export default function App() {
                                     .filter(v => v.lang.toLowerCase().includes(dialogue.lang.split('-')[0].toLowerCase()))
                                     .map((v, i) => {
                                       const name = v.name.toLowerCase();
-                                      let type = " (V)";
-                                      const isMale = name.includes('male') || name.includes('guy') || name.includes('david') || name.includes('marco') || name.includes('stefano') || name.includes('maschile') || name.includes('daniele') || name.includes('frank') || name.includes('luca') || name.includes('davide') || name.includes('riccardo') || name.includes('pietro');
-                                      const isFemale = name.includes('female') || name.includes('woman') || name.includes('zira') || name.includes('elsa') || name.includes('cosma') || name.includes('marta') || name.includes('femminile') || name.includes('chiara') || name.includes('sofia') || name.includes('alice') || name.includes('paola') || name.includes('elena') || name.includes('isabella');
+                                      let type = " 🔊 (V)";
+                                      const isMale = name.includes('male') || name.includes('guy') || name.includes('david') || name.includes('marco') || name.includes('stefano') || name.includes('maschile') || name.includes('daniele') || name.includes('frank') || name.includes('luca') || name.includes('davide') || name.includes('riccardo') || name.includes('pietro') || name.includes('paolo');
+                                      const isFemale = name.includes('female') || name.includes('woman') || name.includes('zira') || name.includes('elsa') || name.includes('cosma') || name.includes('marta') || name.includes('femminile') || name.includes('chiara') || name.includes('sofia') || name.includes('alice') || name.includes('paola') || name.includes('elena') || name.includes('isabella') || name.includes('chiara');
                                       
                                       if (isMale) type = " ♂ (M)";
                                       else if (isFemale) type = " ♀ (F)";
                                       
-                                      const isNatural = name.includes('natural') || name.includes('online') || name.includes('neural') || name.includes('premium');
+                                      const isNatural = name.includes('natural') || name.includes('online') || name.includes('neural') || name.includes('premium') || name.includes('google');
                                       const cleanName = v.name.replace(/Google|Microsoft|Apple|Desktop|Natural|Neural/g, '').trim();
                                       
                                       return (
