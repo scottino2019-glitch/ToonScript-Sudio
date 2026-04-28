@@ -782,7 +782,7 @@ export default function App() {
               {/* Overlay - Simplified for recording to avoid black screen */}
               <div 
                 className="absolute inset-0 bg-black/30 pointer-events-none"
-                style={{ mixBaseline: 'multiply' }}
+                style={{ mixBlendMode: 'multiply' as any }}
               ></div>
 
               {/* Characters */}
@@ -850,10 +850,10 @@ export default function App() {
                   onClick={translateAll}
                   disabled={isTranslating !== null}
                   className="px-6 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/10 transition-all flex items-center gap-2"
-                  title="Traduzione potenziata da Google AI"
+                  title="Traduzione tramite Google Translate"
                 >
                   <Languages size={14} />
-                  Google AI Translate
+                  Google Translate
                 </button>
                 <button 
                   onClick={addDialogue}
