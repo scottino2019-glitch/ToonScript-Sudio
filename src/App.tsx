@@ -257,6 +257,10 @@ export default function App() {
           echoCancellation: false,
           noiseSuppression: false,
           autoGainControl: false,
+          channelCount: 2,
+          sampleRate: 44100,
+          //@ts-ignore
+          suppressLocalAudioPlayback: false
         },
         //@ts-ignore
         preferCurrentTab: true,
@@ -267,6 +271,17 @@ export default function App() {
       const audioTrack = displayStreamRef.current.getAudioTracks()[0];
       if (!audioTrack) {
         alert("ATTENZIONE: Non hai spuntato 'Condividi audio'. Il video sarà muto!");
+      } else {
+        // Force audio settings if possible to avoid distortion
+        try {
+          await audioTrack.applyConstraints({
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          });
+        } catch (e) {
+          console.warn("Could not apply strict audio constraints", e);
+        }
       }
 
       // Stop the video track from displayMedia as we use html2canvas for video
@@ -276,7 +291,7 @@ export default function App() {
       const captureCanvas = document.createElement('canvas');
       captureCanvas.width = 1280;
       captureCanvas.height = 720;
-      const ctx = captureCanvas.getContext('2d', { alpha: false });
+      const ctx = captureCanvas.getContext('2d', { alpha: false, desynchronized: true });
       if (!ctx) return;
 
       // Initial clear
@@ -307,7 +322,8 @@ export default function App() {
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(combinedStream, { 
         mimeType: selectedMimeType || undefined,
-        videoBitsPerSecond: 3000000 
+        videoBitsPerSecond: 3000000,
+        audioBitsPerSecond: 128000
       });
       
       mediaRecorder.ondataavailable = (e) => {

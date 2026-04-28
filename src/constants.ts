@@ -16,7 +16,7 @@ export const BACKGROUNDS = [
 
 export const CHARACTERS = [
   { id: 'char1', name: 'Marta', color: '#FF6B6B', emoji: '👩', image: 'https://api.dicebear.com/9.x/avataaars/png?seed=Marta&mouth=smile&eyes=default', gender: 'female' },
-  { id: 'char2', name: 'Luca', color: '#4D96FF', emoji: '👨', image: 'https://api.dicebear.com/9.x/avataaars/png?seed=Mason&mouth=smile&eyes=default', gender: 'male' },
+  { id: 'char2', name: 'Luca', color: '#4D96FF', emoji: '👨', image: 'https://api.dicebear.com/9.x/avataaars/png?seed=Luca&mouth=smile&eyes=default', gender: 'male' },
   { id: 'char3', name: 'Sofia', color: '#6BCB77', emoji: '👧', image: 'https://api.dicebear.com/9.x/avataaars/png?seed=Sofia&mouth=smile&eyes=default', gender: 'female' },
   { id: 'char4', name: 'Davide', color: '#FFD93D', emoji: '👦', image: 'https://api.dicebear.com/9.x/avataaars/png?seed=Davide&mouth=smile&eyes=default', gender: 'male' },
 ];
