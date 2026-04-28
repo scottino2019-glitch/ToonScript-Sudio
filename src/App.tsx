@@ -253,15 +253,7 @@ export default function App() {
       // Step 1: Capture the screen/tab for AUDIO
       displayStreamRef.current = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "browser" },
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 2,
-          sampleRate: 44100,
-          //@ts-ignore
-          suppressLocalAudioPlayback: false
-        },
+        audio: true, // Use browser defaults for best stability
         //@ts-ignore
         preferCurrentTab: true,
         //@ts-ignore
@@ -271,17 +263,6 @@ export default function App() {
       const audioTrack = displayStreamRef.current.getAudioTracks()[0];
       if (!audioTrack) {
         alert("ATTENZIONE: Non hai spuntato 'Condividi audio'. Il video sarà muto!");
-      } else {
-        // Force audio settings if possible to avoid distortion
-        try {
-          await audioTrack.applyConstraints({
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false
-          });
-        } catch (e) {
-          console.warn("Could not apply strict audio constraints", e);
-        }
       }
 
       // Stop the video track from displayMedia as we use html2canvas for video
@@ -322,8 +303,8 @@ export default function App() {
       recordedChunksRef.current = [];
       const mediaRecorder = new MediaRecorder(combinedStream, { 
         mimeType: selectedMimeType || undefined,
-        videoBitsPerSecond: 3000000,
-        audioBitsPerSecond: 128000
+        videoBitsPerSecond: 2500000,
+        audioBitsPerSecond: 192000 // Improved bitrate for audio
       });
       
       mediaRecorder.ondataavailable = (e) => {
